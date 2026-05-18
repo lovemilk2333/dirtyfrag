@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+
+set -e
+
+ARCH=$(uname -m)
+BINARY=""
+
+case "${ARCH}" in
+    x86_64)
+        BINARY="exp_amd64"
+    ;;
+    aarch64)
+        BINARY="exp_aarch64"
+    ;;
+    # loongarch64)
+    #     BINARY="exp_loong64"
+    # ;;
+    *)
+        echo "unsupported architecture: ${ARCH}"
+        exit 127
+    ;;
+esac
+
+./$BINARY -- $@
